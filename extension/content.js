@@ -483,6 +483,55 @@
       });
       return true; // Keep message channel open for async response
     }
+
+      // NEW: Autonomous quiz automation - extracts questions, gets AI answers, and solves automatically
+      if (request.action === 'autoSolveQuiz') {
+            console.log('[COMET] Starting AUTONOMOUS quiz automation');
+
+            // Step 1: Extract all questions from the page
+            const questions = findQuestionElements();
+            if (!questions || questions.length === 0) {
+                    sendResponse({success: false, error: 'No questions found on page'});
+                    return true;
+                  }
+
+            console.log(`[COMET] Found ${questions.length} questions - sending to AI`);
+
+            // Step 2: Format questions and send to background/AI for answers
+            const quizData = questions.map(q => {
+                    const options = findAnswerOptions(q);
+                    return {
+                              question: q.textContent.trim(),
+                              options: options.map(o => o.innerText || o.textContent || o.value || '').trim()
+                                      };
+                  });
+
+            // Step 3: Send to background script to get AI answers
+            chrome.runtime.sendMessage({
+                    action: 'getQuizAnswers',
+                    quizData: quizData
+                          }, async (response) => {
+                    if (!response || !response.success) {
+                              console.error('[COMET] Failed to get AI answers:', response?.error);
+                              sendResponse({success: false, error: response?.error || 'AI failed'});
+                              return;
+                            }
+
+                    // Step 4: Automatically solve the quiz with AI answers
+                    console.log('[COMET] Got AI answers - starting automatic solving:', response.answers);
+
+                    try {
+                              const result = await solveQuiz(response.answers);
+                              console.log('[COMET] Quiz completed autonomously!', result);
+                              sendResponse({success: true, questionsAnswered: result.questionsAnswered});
+                            } catch (error) {
+                              console.error('[COMET] Error during autonomous solving:', error);
+                              sendResponse({success: false, error: error.message});
+                            }
+                  });
+
+            return true; // Keep message channel open for async response
+          }
     
     if (request.action === 'analyzeQuiz') {
       // Extract quiz questions and send back for AI analysis
