@@ -307,4 +307,210 @@
     }
   });
 
+    // ========================================
+  // QUIZ AUTOMATION FUNCTIONS (CRITICAL)
+  // ========================================
+
+  // 1. Solve quiz by reading and answering all questions
+  async function solveQuiz(aiAnswers) {
+    try {
+      const questions = findQuestionElements();
+      console.log(`[COMET] Found ${questions.length} questions`);
+      
+      for (let i = 0; i < questions.length; i++) {
+        const question = questions[i];
+        const options = findAnswerOptions(question);
+        const correctAnswer = aiAnswers[i];
+        
+        // ACTUALLY click the correct answer
+        const clicked = clickCorrectAnswer(options, correctAnswer);
+        
+        if (clicked) {
+          console.log(`[COMET] Q${i+1}: Selected "${correctAnswer}" ✓`);
+        } else {
+          console.log(`[COMET] Q${i+1}: Could not find "${correctAnswer}"`);
+        }
+        
+        // Wait for page to load next question
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      }
+      
+      // Submit quiz if submit button exists
+      const submitBtn = document.querySelector('button[type="submit"], .submit-btn, input[type="submit"]');
+      if (submitBtn) {
+        submitBtn.click();
+        console.log('[COMET] Quiz submitted ✓');
+      }
+      
+      return {success: true, questionsAnswered: questions.length};
+    } catch (error) {
+      console.error('[COMET] Error solving quiz:', error);
+      return {success: false, error: error.message};
+    }
+  }
+
+  // 2. Find all quiz question elements
+  function findQuestionElements() {
+    const selectors = [
+      '.question', '.quiz-question', '[data-question]',
+      'h3', 'h4', '.question-text', '.q-text',
+      '.quiz-item', '[role="group"]'
+    ];
+    
+    for (const selector of selectors) {
+      const elements = document.querySelectorAll(selector);
+      if (elements.length > 0) {
+        console.log(`[COMET] Found questions using selector: ${selector}`);
+        return Array.from(elements);
+      }
+    }
+    
+    // Fallback: look for common question patterns
+    const allText = document.querySelectorAll('p, div, h1, h2, h3, h4');
+    const questions = Array.from(allText).filter(el => {
+      const text = el.textContent.trim();
+      return text.endsWith('?') && text.length > 10 && text.length < 500;
+    });
+    
+    if (questions.length > 0) {
+      console.log(`[COMET] Found ${questions.length} questions by pattern matching`);
+    }
+    
+    return questions;
+  }
+
+  // 3. Find answer options for a question
+  function findAnswerOptions(questionElement) {
+    // Try to find options within the question's parent or next siblings
+    let container = questionElement.parentElement;
+    
+    const selectors = [
+      'input[type="radio"], input[type="checkbox"]',
+      'button.answer-option, button.option',
+      '.answer-option, .option, .choice',
+      '[role="radio"], [role="checkbox"]',
+      'label', 'li'
+    ];
+    
+    for (const selector of selectors) {
+      const options = container.querySelectorAll(selector);
+      if (options.length > 1 && options.length < 20) {
+        console.log(`[COMET] Found ${options.length} options using: ${selector}`);
+        return Array.from(options);
+      }
+    }
+    
+    // Fallback: look for clickable elements near the question
+    const allButtons = container.querySelectorAll('button, input, label, div[onclick]');
+    if (allButtons.length > 0) {
+      return Array.from(allButtons);
+    }
+    
+    return [];
+  }
+
+  // 4. ACTUALLY click the correct answer (MOST CRITICAL)
+  function clickCorrectAnswer(options, correctAnswer) {
+    if (!options || options.length === 0) {
+      console.error('[COMET] No options provided to click');
+      return false;
+    }
+    
+    console.log(`[COMET] Searching for answer: "${correctAnswer}"`);
+    
+    // Try exact text match first
+    for (let option of options) {
+      const text = (option.innerText || option.textContent || option.value || '').trim();
+      if (text.toLowerCase() === correctAnswer.toLowerCase()) {
+        console.log(`[COMET] EXACT MATCH - Clicking: "${text}"`);
+        option.click();
+        option.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+        if (option.type === 'radio' || option.type === 'checkbox') {
+          option.checked = true;
+          option.dispatchEvent(new Event('change', {bubbles: true}));
+        }
+        return true;
+      }
+    }
+    
+    // Try partial match (includes)
+    for (let option of options) {
+      const text = (option.innerText || option.textContent || option.value || '').trim();
+      if (text.toLowerCase().includes(correctAnswer.toLowerCase()) || 
+          correctAnswer.toLowerCase().includes(text.toLowerCase())) {
+        console.log(`[COMET] PARTIAL MATCH - Clicking: "${text}"`);
+        option.click();
+        option.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+        if (option.type === 'radio' || option.type === 'checkbox') {
+          option.checked = true;
+          option.dispatchEvent(new Event('change', {bubbles: true}));
+        }
+        return true;
+      }
+    }
+    
+    // Try fuzzy match (word-by-word)
+    const answerWords = correctAnswer.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    for (let option of options) {
+      const text = (option.innerText || option.textContent || option.value || '').toLowerCase();
+      const matchCount = answerWords.filter(word => text.includes(word)).length;
+      if (matchCount >= Math.ceil(answerWords.length * 0.5)) {
+        console.log(`[COMET] FUZZY MATCH (${matchCount}/${answerWords.length} words) - Clicking`);
+        option.click();
+        option.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+        if (option.type === 'radio' || option.type === 'checkbox') {
+          option.checked = true;
+          option.dispatchEvent(new Event('change', {bubbles: true}));
+        }
+        return true;
+      }
+    }
+    
+    console.error('[COMET] Could not find matching answer');
+    return false;
+  }
+
+  // 5. Message handler - receive quiz commands from background/AI
+  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    console.log('[COMET] Received message:', request);
+    
+    if (request.action === 'solveQuiz') {
+      console.log('[COMET] Starting quiz automation with AI answers');
+      solveQuiz(request.answers).then(result => {
+        sendResponse(result);
+      }).catch(error => {
+        sendResponse({success: false, error: error.message});
+      });
+      return true; // Keep message channel open for async response
+    }
+    
+    if (request.action === 'analyzeQuiz') {
+      // Extract quiz questions and send back for AI analysis
+      const questions = findQuestionElements();
+      const quizData = questions.map(q => {
+        const options = findAnswerOptions(q);
+        return {
+          question: q.textContent.trim(),
+          options: options.map(o => (o.innerText || o.textContent || o.value || '').trim())
+        };
+      });
+      sendResponse({success: true, quizData});
+      return true;
+    }
+    
+    if (request.action === 'clickAnswer') {
+      // Click a specific answer
+      const {questionIndex, answer} = request;
+      const questions = findQuestionElements();
+      if (questions[questionIndex]) {
+        const options = findAnswerOptions(questions[questionIndex]);
+        const clicked = clickCorrectAnswer(options, answer);
+        sendResponse({success: clicked});
+      } else {
+        sendResponse({success: false, error: 'Question not found'});
+      }
+      return true;
+    }
+  });
+
 })();
