@@ -20,6 +20,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       });
     return true; // Keep message channel open
   }
+
+    // NEW: Handler for autonomous quiz automation
+    if (request.action === 'getQuizAnswers') {
+          console.log('[Background] Getting AI answers for autonomous quiz');
+          // Call the existing Gemini function to get answers
+          analyzeQuizWithGemini(request.quizData)
+            .then(answers => {
+                      console.log('[Background] Got answers:', answers);
+                      sendResponse({success: true, answers});
+                    })
+            .catch(error => {
+                      console.error('[Background] Error getting answers:', error);
+                      sendResponse({success: false, error: error.message});
+                    });
+          return true; // Keep message channel open
+        }
   
   if (request.action === 'getAIResponse') {
     // General AI query
